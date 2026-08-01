@@ -28,6 +28,7 @@ test-results
 *.njsproj
 *.sln
 *.sw?
+CLAUDE.md
 PRODUCT_HUNT_LAUNCH.md
 code_fixer.md
 ANNOUNCEMENT_2026-03-02.md
@@ -37,3 +38,10 @@ docs/en/codebase-audit-*.md
 docs/en/fix-log.md
 docs/en/next-level-roadmap-*.md
 docs/internal
+.claude/scheduled_tasks.lock
+docs-site/.astro/
+
+# Local AI tooling (skills, agents, scratch edits) — not product code
+.agents/
+.claude/skills/
+.codex-skill-edits/

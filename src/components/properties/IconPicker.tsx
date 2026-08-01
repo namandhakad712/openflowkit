@@ -8,7 +8,9 @@ import {
     loadProviderShapePreview,
 } from '@/services/shapeLibrary/providerCatalog';
 import { useAssetCatalog } from '@/hooks/useAssetCatalog';
+import { useResolvedMediaUrl } from '@/hooks/useResolvedMediaUrl';
 import { inferAssetProviderFromPackId } from '@/lib/nodeIconState';
+import { AssetEncodeError, ingestUserMediaFile } from '@/services/storage/assetStore';
 import { ICON_NAMES, ICON_PICKER_PRIORITY_NAMES, NamedIcon } from '../IconMap';
 import { Tooltip } from '../Tooltip';
 import { Select } from '../ui/Select';
@@ -40,34 +42,26 @@ export interface ProviderIconSelection {
 interface IconPickerProps {
     selectedIcon?: string;
     customIconUrl?: string;
+    iconAssetId?: string;
     selectedProvider?: DomainLibraryCategory;
     selectedProviderCategory?: string;
     selectedProviderPackId?: string;
     selectedProviderShapeId?: string;
     onSelectBuiltInIcon: (icon: string) => void;
     onSelectProviderIcon: (selection: ProviderIconSelection) => void;
-    onCustomIconChange: (url?: string) => void;
-}
-
-function readFileAsDataUrl(file: File, onLoad: (result: string) => void): void {
-    const reader = new FileReader();
-    reader.onloadend = () => {
-        if (typeof reader.result === 'string') {
-            onLoad(reader.result);
-        }
-    };
-    reader.readAsDataURL(file);
+    onCustomIconChange: (url?: string, iconAssetId?: string) => void;
 }
 
 function getInitialSource(
     selectedProviderPackId: string | undefined,
     selectedProviderShapeId: string | undefined,
-    customIconUrl: string | undefined
+    customIconUrl: string | undefined,
+    iconAssetId: string | undefined
 ): IconSource {
     if (selectedProviderPackId && selectedProviderShapeId) {
         return 'provider';
     }
-    if (customIconUrl) {
+    if (customIconUrl || iconAssetId) {
         return 'upload';
     }
     return 'built-in';
@@ -80,6 +74,7 @@ function getProviderLabel(provider: DomainLibraryCategory): string {
 export const IconPicker: React.FC<IconPickerProps> = ({
     selectedIcon,
     customIconUrl,
+    iconAssetId,
     selectedProvider,
     selectedProviderCategory,
     selectedProviderPackId,
@@ -89,30 +84,28 @@ export const IconPicker: React.FC<IconPickerProps> = ({
     onCustomIconChange,
 }) => {
     const [iconSearch, setIconSearch] = useState('');
-    const [iconSource, setIconSource] = useState<IconSource>(
-        getInitialSource(selectedProviderPackId, selectedProviderShapeId, customIconUrl)
+    const [userIconSource, setUserIconSource] = useState<IconSource | null>(null);
+    const [userProvider, setUserProvider] = useState<DomainLibraryCategory | null>(null);
+    const [uploadError, setUploadError] = useState<string | null>(null);
+    const inferredProvider = inferAssetProviderFromPackId(selectedProviderPackId);
+    const resolvedCustomIconUrl = useResolvedMediaUrl(
+        { customIconUrl, iconAssetId },
+        'icon'
     );
-    const [provider, setProvider] = useState<DomainLibraryCategory>(
+    const iconSource =
+        userIconSource
+        ?? getInitialSource(
+            selectedProviderPackId,
+            selectedProviderShapeId,
+            customIconUrl,
+            iconAssetId
+        );
+    const provider =
         selectedProvider
-        ?? inferAssetProviderFromPackId(selectedProviderPackId)
+        ?? inferredProvider
+        ?? userProvider
         ?? (PROVIDER_OPTIONS[0]?.value as DomainLibraryCategory)
-        ?? 'aws'
-    );
-
-    useEffect(() => {
-        setIconSource(getInitialSource(selectedProviderPackId, selectedProviderShapeId, customIconUrl));
-    }, [selectedProviderPackId, selectedProviderShapeId, customIconUrl]);
-
-    useEffect(() => {
-        if (selectedProvider) {
-            setProvider(selectedProvider);
-            return;
-        }
-        const inferredProvider = inferAssetProviderFromPackId(selectedProviderPackId);
-        if (inferredProvider) {
-            setProvider(inferredProvider);
-        }
-    }, [selectedProvider, selectedProviderPackId]);
+        ?? 'aws';
 
     const filteredIcons = useMemo(() => {
         const term = iconSearch.toLowerCase();
@@ -161,13 +154,32 @@ export const IconPicker: React.FC<IconPickerProps> = ({
         setCategory('all');
     }, [provider, setCategory, setQuery]);
 
-    function handleCustomIconFileChange(event: React.ChangeEvent<HTMLInputElement>): void {
+    async function handleCustomIconFileChange(
+        event: React.ChangeEvent<HTMLInputElement>
+    ): Promise<void> {
         const file = event.target.files?.[0];
+        event.target.value = '';
         if (!file) {
             return;
         }
 
-        readFileAsDataUrl(file, onCustomIconChange);
+        setUploadError(null);
+        try {
+            const result = await ingestUserMediaFile(file, 'icon', { fileName: file.name });
+            onCustomIconChange(
+                result.assetId ? undefined : result.displayUrl,
+                result.assetId
+            );
+        } catch (error) {
+            // Keep picker usable; surface a short message so the failure is not silent.
+            const message =
+                error instanceof AssetEncodeError
+                    ? error.message
+                    : error instanceof Error
+                      ? error.message
+                      : 'Failed to process the selected icon.';
+            setUploadError(message);
+        }
     }
 
     async function handleProviderIconSelect(item: DomainLibraryItem): Promise<void> {
@@ -197,7 +209,7 @@ export const IconPicker: React.FC<IconPickerProps> = ({
                 columns={3}
                 size="sm"
                 selectedId={iconSource}
-                onSelect={(value) => setIconSource(value as IconSource)}
+                onSelect={(value) => setUserIconSource(value as IconSource)}
                 items={ICON_SOURCE_OPTIONS.map((option) => ({ id: option.id, label: option.label }))}
             />
 
@@ -255,7 +267,7 @@ export const IconPicker: React.FC<IconPickerProps> = ({
                 <div className="space-y-3">
                     <Select
                         value={provider}
-                        onChange={(value) => setProvider(value as DomainLibraryCategory)}
+                        onChange={(value) => setUserProvider(value as DomainLibraryCategory)}
                         options={PROVIDER_OPTIONS}
                         placeholder="Choose provider"
                     />
@@ -338,15 +350,23 @@ export const IconPicker: React.FC<IconPickerProps> = ({
 
             {iconSource === 'upload' ? (
                 <div className="space-y-2">
-                    {customIconUrl ? (
+                    {resolvedCustomIconUrl || iconAssetId ? (
                         <div className="flex items-center gap-2 rounded-[var(--brand-radius)] border border-[var(--color-brand-border)] bg-[var(--brand-surface)] px-3 py-2">
                             <div className="flex h-8 w-8 items-center justify-center overflow-hidden rounded-lg border border-[var(--color-brand-border)] bg-[var(--brand-background)]">
-                                <img src={customIconUrl} alt="custom" className="h-5 w-5 object-contain" />
+                                {resolvedCustomIconUrl ? (
+                                    <img
+                                        src={resolvedCustomIconUrl}
+                                        alt="custom"
+                                        className="h-5 w-5 object-contain"
+                                    />
+                                ) : (
+                                    <ImageIcon className="h-4 w-4 text-[var(--brand-secondary)]" />
+                                )}
                             </div>
                             <span className="flex-1 text-xs text-[var(--brand-secondary)]">Uploaded icon</span>
                             <button
                                 type="button"
-                                onClick={() => onCustomIconChange(undefined)}
+                                onClick={() => onCustomIconChange(undefined, undefined)}
                                 className="rounded-full border border-red-500/20 bg-red-500/10 px-2 py-0.5 text-[10px] text-red-400 transition-colors hover:bg-red-500/15"
                             >
                                 Remove
@@ -356,14 +376,25 @@ export const IconPicker: React.FC<IconPickerProps> = ({
 
                     <label className="flex w-full cursor-pointer items-center gap-2 rounded-[var(--brand-radius)] border border-dashed border-[var(--color-brand-border)] bg-[var(--brand-surface)] px-3 py-2 text-xs text-[var(--brand-secondary)] transition-all hover:border-[var(--brand-primary-400)] hover:bg-[var(--brand-background)] hover:text-[var(--brand-primary)]">
                         <Upload className="h-3.5 w-3.5" />
-                        <span>{customIconUrl ? 'Replace uploaded icon' : 'Upload custom icon'}</span>
+                        <span>
+                            {resolvedCustomIconUrl || iconAssetId
+                                ? 'Replace uploaded icon'
+                                : 'Upload custom icon'}
+                        </span>
                         <input
                             type="file"
                             accept="image/svg+xml,image/png,image/jpeg,image/webp"
                             className="hidden"
-                            onChange={handleCustomIconFileChange}
+                            onChange={(event) => {
+                                void handleCustomIconFileChange(event);
+                            }}
                         />
                     </label>
+                    {uploadError ? (
+                        <p className="text-xs text-red-500" role="alert">
+                            {uploadError}
+                        </p>
+                    ) : null}
                 </div>
             ) : null}
         </div>

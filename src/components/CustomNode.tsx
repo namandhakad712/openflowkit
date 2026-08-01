@@ -12,6 +12,7 @@ import { NodeTransformControls } from './NodeTransformControls';
 import { useActiveNodeSelection } from './useActiveNodeSelection';
 import { useTranslation } from 'react-i18next';
 import { useProviderShapePreview } from '@/hooks/useProviderShapePreview';
+import { useResolvedMediaUrl } from '@/hooks/useResolvedMediaUrl';
 import { useShiftHeld } from '@/hooks/useShiftHeld';
 import { NodeShapeSVG } from './NodeShapeSVG';
 import { DiffBadge, LintViolationBadge } from './NodeBadges';
@@ -73,10 +74,12 @@ function CustomNode(props: LegacyNodeProps<NodeData>): React.ReactElement {
   const explicitHeightPx = getNumericNodeDimension(explicitHeight);
   const measuredHeight = (props as { height?: number }).height;
   const shiftHeld = useShiftHeld(Boolean(selected));
+  const resolvedUploadedIconUrl = useResolvedMediaUrl(data, 'image');
+  const resolvedCustomIconUrl = useResolvedMediaUrl(data, 'icon');
   const resolvedAssetIconUrl = useProviderShapePreview(
     typeof data.archIconPackId === 'string' ? data.archIconPackId : undefined,
     typeof data.archIconShapeId === 'string' ? data.archIconShapeId : undefined,
-    typeof data.customIconUrl === 'string' ? data.customIconUrl : undefined
+    resolvedCustomIconUrl
   );
   const designSystem = useDesignSystem();
   const isActiveSelected = useActiveNodeSelection(Boolean(selected));
@@ -106,7 +109,13 @@ function CustomNode(props: LegacyNodeProps<NodeData>): React.ReactElement {
   const subLabelIsNumericSize = !isNaN(Number(subLabelFontSize));
   const subLabelSizeClass = fontSizeClassFor(subLabelFontSize);
   const subLabelFontSizeStyle = subLabelIsNumericSize ? { fontSize: subLabelFontSize + 'px' } : {};
-  const hasIcon = Boolean(iconName) || Boolean(data.customIconUrl);
+  const hasProviderIcon = Boolean(resolvedAssetIconUrl) || Boolean(data.archIconPackId);
+  const hasIcon =
+    Boolean(iconName)
+    || Boolean(data.customIconUrl)
+    || Boolean(data.iconAssetId)
+    || Boolean(resolvedCustomIconUrl)
+    || hasProviderIcon;
   const hasLabel = Boolean(data.label?.trim());
   const hasSubLabel = Boolean(data.subLabel);
   const mermaidImportedNodeMetadata = readMermaidImportedNodeMetadataFromData(data);
@@ -293,7 +302,10 @@ function CustomNode(props: LegacyNodeProps<NodeData>): React.ReactElement {
           )}
 
           <CustomNodeContent
-            data={data}
+            data={{
+              ...data,
+              imageUrl: resolvedUploadedIconUrl ?? data.imageUrl,
+            }}
             hasIcon={hasIcon}
             hasSubLabel={hasSubLabel}
             resolvedAssetIconUrl={resolvedAssetIconUrl}

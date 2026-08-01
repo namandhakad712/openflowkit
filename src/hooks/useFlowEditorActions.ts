@@ -17,7 +17,7 @@ import {
     exportPlantUMLToClipboard,
 } from './flow-editor-actions/exportHandlers';
 import { toOpenFlowDSL } from '@/services/openFlowDSLExporter';
-import { encodeDslForViewer } from '@/components/DiagramViewer';
+import { encodeDslForViewer } from '@/services/viewerUrlCodec';
 import {
     buildTemplateInsertionResult,
     getAutoLayoutResult,
